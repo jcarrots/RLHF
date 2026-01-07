@@ -12,12 +12,15 @@ reward model training, PPO-based RLHF, and LoRA merging.
 ## Data requirements (training inputs)
 
 ### SFT (`training_sft.py`)
-- Dataset is loaded via `datasets.load_dataset(args.dataset_name, data_dir=args.subset, split=args.split)`.
-- Expected fields per example:
-  - `question` (string)
-  - `response_j` (string, preferred answer)
-- The script formats each example as:
-  - `Question: {question}\n\nAnswer: {response_j}`
+- Dataset is loaded via `datasets.load_dataset(args.dataset_name, split=args.split, data_dir=args.subset (optional))`.
+- Supported schemas:
+  - Chat datasets with a `messages` column (list of `{role, content}` dicts). Recommended with an *Instruct/chat* model.
+  - Simple prompt/response datasets:
+    - `question` + `response_j`
+    - `prompt` + `response`
+    - `prompt` + `chosen` (string)
+- For simple prompt/response datasets, the script formats each example as:
+  - `Question: {question}\n\nAnswer: {answer}`
 
 ### Reward model (`training_reward_model.py`)
 - Train split: `data/reward`, eval split: `data/evaluation`.
@@ -51,3 +54,46 @@ data/
   JSON/Parquet/Arrow files, ensure the dataset loader is configured accordingly
   (or update the `load_dataset` calls).
 - Model/tokenizer paths are supplied via CLI args (see each script for details).
+
+## Quickstart: SFT on Llama-3B (local machine)
+
+### 1) Install deps
+Option A (recommended if you already have a working CUDA PyTorch installed globally): reuse it in the venv:
+
+```powershell
+python -m venv .venv --system-site-packages
+.\.venv\Scripts\python -m pip install -U pip
+.\.venv\Scripts\python -m pip install -r requirements.txt
+```
+
+Option B: install PyTorch inside the venv (see https://pytorch.org/ for the right command for your CUDA version). Then:
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\python -m pip install -U pip
+.\.venv\Scripts\python -m pip install -r requirements.txt
+```
+
+### 2) Get a Llama-3B checkpoint
+Use either:
+- A local path to a downloaded checkpoint (recommended if you already have it), or
+- A Hugging Face model id (Llama models are gated; you must accept the license and be logged in via `hf auth login`).
+
+### 3) Run SFT (LoRA recommended)
+Example using `HuggingFaceH4/ultrafeedback_binarized` (chat `messages`) and a 3B Instruct model:
+
+```powershell
+.\.venv\Scripts\python .\training_sft.py `
+  --model_path meta-llama/Llama-3.2-3B-Instruct `
+  --dataset_name HuggingFaceH4/ultrafeedback_binarized `
+  --split train_sft `
+  --output_dir .\checkpoints\sft_llama3b_ultrafeedback `
+  --bf16 `
+  --use_lora `
+  --batch_size 1 `
+  --gradient_accumulation_steps 8 `
+  --max_steps 1000
+```
+
+Output is written under `--output_dir` (the final checkpoint is saved to `final_checkpoint/`). If you trained with LoRA,
+use `merge_with_lora.py` to merge the adapter into the base model.

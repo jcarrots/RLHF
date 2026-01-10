@@ -1,6 +1,12 @@
 from dataclasses import dataclass, field
 from typing import Optional
 
+import os
+
+os.environ.setdefault("USE_TF", "0")
+os.environ.setdefault("USE_FLAX", "0")
+os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
+
 import torch
 from peft import PeftConfig, PeftModel
 from transformers import AutoModelForCausalLM, AutoModelForSequenceClassification, AutoTokenizer, HfArgumentParser
@@ -20,9 +26,9 @@ class ScriptArguments:
 
 parser = HfArgumentParser(ScriptArguments)
 script_args = parser.parse_args_into_dataclasses()[0]
-assert script_args.lora_model_name is not None, "please provide the name of the Adapter you would like to merge"
-assert script_args.base_model_name is not None, "please provide the name of the Base model"
-assert script_args.output_name is not None, "please provide the output name of the merged model"
+assert script_args.lora_model_name, "please provide the name/path of the adapter you would like to merge"
+assert script_args.base_model_name, "please provide the name/path of the base model"
+assert script_args.output_name, "please provide the output path for the merged model"
 
 peft_config = PeftConfig.from_pretrained(script_args.lora_model_name)
 if peft_config.task_type == "SEQ_CLS":

@@ -23,22 +23,21 @@ reward model training, PPO-based RLHF, and LoRA merging.
   - `Question: {question}\n\nAnswer: {answer}`
 
 ### Reward model (`training_reward_model.py`)
-- Train split: `data/reward`, eval split: `data/evaluation`.
-- Expected fields per example:
-  - `question` (string)
-  - `response_j` (string, preferred answer)
-  - `response_k` (string, rejected answer)
-- Each example yields a pair of sequences:
-  - `Question: {question}\n\nAnswer: {response_j}` (preferred)
-  - `Question: {question}\n\nAnswer: {response_k}` (rejected)
+- Dataset is loaded via `datasets.load_dataset(args.dataset_name, split=args.train_split/args.eval_split, data_dir=args.subset (optional))`.
+- Supported schemas:
+  - Pairwise preference datasets:
+    - `prompt` + `chosen` + `rejected` (UltraFeedback: `chosen`/`rejected` are chat `messages` lists)
+    - `question` + `response_j` + `response_k`
+- For chat datasets (like UltraFeedback), the script uses the tokenizer chat template when available; otherwise it falls back to:
+  - `Question: {prompt}\n\nAnswer: {chosen/rejected}`
 
 ### RLHF PPO (`training_rl.py`)
-- Train split: `data/rl`.
+- Dataset is loaded via `datasets.load_dataset(args.dataset_name, split=args.split, data_dir=args.subset (optional))`.
 - Expected fields per example:
-  - `question` (string)
-- The model generates answers to prompts formatted as:
-  - `Question: {question}\n\nAnswer: `
-- The reward model (specified by `--reward_model_name`) scores generated responses.
+  - `prompt` (string) or `question` (string)
+- Prompts are formatted using the tokenizer chat template when available; otherwise:
+  - `Question: {prompt}\n\nAnswer: `
+- The reward model is a `AutoModelForSequenceClassification`-style model with a scalar score head (e.g. Llama/GPT2 seq-cls).
 
 ## Expected local layout (if using local datasets)
 ```
@@ -97,3 +96,38 @@ Example using `HuggingFaceH4/ultrafeedback_binarized` (chat `messages`) and a 3B
 
 Output is written under `--output_dir` (the final checkpoint is saved to `final_checkpoint/`). If you trained with LoRA,
 use `merge_with_lora.py` to merge the adapter into the base model.
+
+## Quickstart: Reward model + PPO (UltraFeedback)
+
+### 1) Train a reward model (pairwise prefs)
+
+```powershell
+.\.venv\Scripts\python .\training_reward_model.py `
+  --model_path meta-llama/Llama-3.2-3B-Instruct `
+  --dataset_name HuggingFaceH4/ultrafeedback_binarized `
+  --train_split train_prefs `
+  --eval_split test_prefs `
+  --output_dir .\checkpoints\rm_llama3b_ultrafeedback `
+  --bf16 `
+  --use_lora `
+  --per_device_train_batch_size 1 `
+  --gradient_accumulation_steps 8 `
+  --max_steps 1000
+```
+
+### 2) PPO fine-tune with the reward model
+
+```powershell
+.\.venv\Scripts\python .\training_rl.py `
+  --model_path .\checkpoints\sft_llama3b_ultrafeedback\final_checkpoint `
+  --reward_model_path .\checkpoints\rm_llama3b_ultrafeedback\final_checkpoint `
+  --dataset_name HuggingFaceH4/ultrafeedback_binarized `
+  --split train_gen `
+  --output_dir .\checkpoints\ppo_llama3b_ultrafeedback `
+  --bf16 `
+  --use_lora `
+  --per_device_train_batch_size 1 `
+  --gradient_accumulation_steps 8 `
+  --total_episodes 1024 `
+  --response_length 128
+```

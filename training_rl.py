@@ -11,6 +11,7 @@ import torch
 from datasets import load_dataset
 from peft import LoraConfig, PeftConfig, PeftModel
 from transformers import AutoModelForCausalLM, AutoModelForSequenceClassification, AutoTokenizer, logging, set_seed
+from transformers.trainer_utils import get_last_checkpoint
 
 from trl.experimental.ppo import PPOConfig, PPOTrainer
 
@@ -28,6 +29,21 @@ def _build_prompt_text(tokenizer: AutoTokenizer, prompt: str) -> str:
         messages = [{"role": "user", "content": prompt}]
         return tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
     return f"Question: {prompt}\n\nAnswer: "
+
+
+def _resolve_resume_checkpoint(resume_from_checkpoint: str, output_dir: str) -> Optional[str]:
+    if not resume_from_checkpoint:
+        return None
+
+    if resume_from_checkpoint.lower() == "last":
+        last_checkpoint = get_last_checkpoint(output_dir)
+        if last_checkpoint is None:
+            raise ValueError(
+                f"`--resume_from_checkpoint last` was set, but no checkpoint was found under `{output_dir}`."
+            )
+        return last_checkpoint
+
+    return resume_from_checkpoint
 
 
 def _load_policy_model(
@@ -97,6 +113,13 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--bf16", action="store_true", default=False)
     parser.add_argument("--fp16", action="store_true", default=False)
     parser.add_argument("--gradient_checkpointing", action="store_true", default=False)
+    parser.add_argument("--deepspeed", type=str, default="", help="Path to DeepSpeed config json.")
+    parser.add_argument(
+        "--resume_from_checkpoint",
+        type=str,
+        default="",
+        help="Checkpoint path to resume from (currently passed through to PPOConfig).",
+    )
     parser.add_argument("--seed", type=int, default=0)
 
     parser.add_argument("--use_lora", action="store_true", default=False, help="Train PPO updates with a new LoRA adapter.")
@@ -188,6 +211,7 @@ def main() -> None:
     dataset = dataset.map(to_tokens, **map_kwargs)
 
     stop_token = None if args.stop_token == "none" else "eos"
+    resume_checkpoint = _resolve_resume_checkpoint(args.resume_from_checkpoint, args.output_dir)
 
     ppo_config = PPOConfig(
         output_dir=args.output_dir,
@@ -210,6 +234,8 @@ def main() -> None:
         bf16=bool(args.bf16),
         fp16=bool(args.fp16),
         gradient_checkpointing=args.gradient_checkpointing,
+        deepspeed=args.deepspeed or None,
+        resume_from_checkpoint=resume_checkpoint,
     )
 
     trainer = PPOTrainer(

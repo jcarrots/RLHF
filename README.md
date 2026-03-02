@@ -131,3 +131,52 @@ use `merge_with_lora.py` to merge the adapter into the base model.
   --total_episodes 1024 `
   --response_length 128
 ```
+
+## PACE 4xH100 distributed RLHF (Accelerate + DeepSpeed)
+
+This repo now includes a full pipeline launcher for:
+- SFT -> reward model -> PPO
+- `HuggingFaceH4/ultrafeedback_binarized`
+- LoRA + bf16 + gradient checkpointing
+- checkpoint resume support (`--resume_from_checkpoint last`)
+
+### Added configs/scripts
+- Accelerate config: `configs/accelerate/pace_4xh100_bf16.yaml`
+- DeepSpeed config: `configs/deepspeed/zero2_bf16_h100.json`
+- Pipeline script: `scripts/pace/run_rlhf_ultrafeedback.sh`
+- Slurm template: `scripts/pace/submit_rlhf_ultrafeedback.sbatch`
+- Cluster deps: `requirements.cluster.txt`
+
+### Cluster setup
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -U pip
+pip install -r requirements.cluster.txt
+```
+
+### Run directly on a 4-GPU node
+```bash
+source .venv/bin/activate
+export MODEL_PATH=meta-llama/Llama-3.2-3B-Instruct
+bash scripts/pace/run_rlhf_ultrafeedback.sh
+```
+
+To resume interrupted runs from latest stage checkpoints:
+```bash
+export RESUME=1
+bash scripts/pace/run_rlhf_ultrafeedback.sh
+```
+
+To resume only selected stages:
+```bash
+export RESUME_SFT=0
+export RESUME_RM=1
+export RESUME_PPO=0
+bash scripts/pace/run_rlhf_ultrafeedback.sh
+```
+
+### Submit with Slurm
+```bash
+sbatch scripts/pace/submit_rlhf_ultrafeedback.sbatch
+```

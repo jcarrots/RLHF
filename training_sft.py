@@ -9,6 +9,7 @@ import torch
 from datasets import load_dataset
 from peft import LoraConfig
 from transformers import AutoModelForCausalLM, AutoTokenizer, logging, set_seed
+from transformers.trainer_utils import get_last_checkpoint
 
 from trl import SFTConfig, SFTTrainer
 
@@ -51,6 +52,12 @@ def get_args():
     parser.add_argument("--eval_freq", default=1000, type=int)
     parser.add_argument("--save_freq", default=1000, type=int)
     parser.add_argument("--deepspeed", type=str, default="")
+    parser.add_argument(
+        "--resume_from_checkpoint",
+        type=str,
+        default="",
+        help="Checkpoint path to resume from, or 'last' to auto-detect the latest checkpoint in output_dir.",
+    )
     parser.add_argument("--num_train_epochs", type=int, default=1)
 
     parser.add_argument("--use_lora", action="store_true", default=False)
@@ -126,6 +133,21 @@ def create_datasets(tokenizer, args):
     valid_data = dataset["test"]
     print(f"Size of the train set: {len(train_data)}. Size of the validation set: {len(valid_data)}")
     return train_data, valid_data
+
+
+def resolve_resume_checkpoint(resume_from_checkpoint: str, output_dir: str):
+    if not resume_from_checkpoint:
+        return None
+
+    if resume_from_checkpoint.lower() == "last":
+        last_checkpoint = get_last_checkpoint(output_dir)
+        if last_checkpoint is None:
+            raise ValueError(
+                f"`--resume_from_checkpoint last` was set, but no checkpoint was found under `{output_dir}`."
+            )
+        return last_checkpoint
+
+    return resume_from_checkpoint
 
 
 def run_training(args, tokenizer, train_data, val_data):
@@ -247,7 +269,8 @@ def run_training(args, tokenizer, train_data, val_data):
     print_trainable_parameters(trainer.model)
 
     print("Training...")
-    trainer.train()
+    resume_checkpoint = resolve_resume_checkpoint(args.resume_from_checkpoint, args.output_dir)
+    trainer.train(resume_from_checkpoint=resume_checkpoint)
 
     print("Saving last checkpoint of the model")
     trainer.model.save_pretrained(os.path.join(args.output_dir, "final_checkpoint/"))

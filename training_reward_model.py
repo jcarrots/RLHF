@@ -21,6 +21,7 @@ from transformers import (
     TrainerCallback,
     TrainingArguments,
 )
+from transformers.trainer_utils import get_last_checkpoint
 from transformers.utils import PaddingStrategy
 
 
@@ -91,9 +92,9 @@ def _format_pair_texts(
 @dataclass
 class ScriptArguments:
     local_rank: Optional[int] = field(default=-1, metadata={"help": "Used for multi-gpu"})
-    resume_from_checkpoint: Optional[bool] = field(
-        default=False,
-        metadata={"help": "Resume training from the last checkpoint in output_dir."},
+    resume_from_checkpoint: Optional[str] = field(
+        default="",
+        metadata={"help": "Checkpoint path to resume from, or 'last' to auto-detect latest in output_dir."},
     )
     deepspeed: Optional[str] = field(default=None, metadata={"help": "Path to a deepspeed config json."})
 
@@ -271,6 +272,21 @@ class RewardTrainer(Trainer):
         return loss
 
 
+def resolve_resume_checkpoint(resume_from_checkpoint: Optional[str], output_dir: str) -> Optional[str]:
+    if not resume_from_checkpoint:
+        return None
+
+    if resume_from_checkpoint.lower() == "last":
+        last_checkpoint = get_last_checkpoint(output_dir)
+        if last_checkpoint is None:
+            raise ValueError(
+                f"`--resume_from_checkpoint last` was set, but no checkpoint was found under `{output_dir}`."
+            )
+        return last_checkpoint
+
+    return resume_from_checkpoint
+
+
 def main(script_args: ScriptArguments) -> None:
     assert script_args.model_path, "Please provide --model_path"
     assert script_args.dataset_name, "Please provide --dataset_name"
@@ -386,7 +402,8 @@ def main(script_args: ScriptArguments) -> None:
 
         trainer.add_callback(EvaluateFirstStepCallback())
 
-    trainer.train(resume_from_checkpoint=script_args.resume_from_checkpoint)
+    resume_checkpoint = resolve_resume_checkpoint(script_args.resume_from_checkpoint, script_args.output_dir)
+    trainer.train(resume_from_checkpoint=resume_checkpoint)
 
     final_dir = os.path.join(script_args.output_dir, "final_checkpoint")
     os.makedirs(final_dir, exist_ok=True)
